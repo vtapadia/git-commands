@@ -1,0 +1,24 @@
+#!/bin/bash
+
+if [[ "$1" == '--raw' ]]; then
+    RAW=1
+    shift
+fi
+
+author=$1
+if [[ -z "$author" ]]; then
+    echo "Usage: git author [author name]"
+    exit
+fi
+
+git log --author="$author" --pretty=tformat: --numstat | awk -v RAW=$RAW '{
+    added    += $1;
+    removed  += $2;
+    modified += $1 - -$2;
+    total    += $1 - $2;
+} END {
+    if (RAW)
+        printf "%10s %10s %10s %10s", added, removed, total, modified
+    else
+        printf "Added: %10s, Removed: %10s, Total: %10s, Modified: %10s lines\n", added, removed, total, modified
+}'
