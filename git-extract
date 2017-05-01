@@ -1,9 +1,34 @@
 #!/bin/bash
 
-echo "hash;date;added;deleted;filename;user"
-git log --pretty=tformat:'%aI %H %an' | while read date hash name; do
+if [[ "$1" == '--raw' ]]; then
+    RAW=1;
+    shift;
+fi
+
+if [[ "$1" == '--header' ]]; then
+    HEADER=1;
+    shift;
+fi
+
+if [[ "$1" == '--year' ]]; then
+	YEAR=`date +%Y`
+	FLAG="--since=\"${YEAR}-01-01T00:00:00\""
+	shift;
+else
+	FLAG=""
+fi
+
+if [[ -z $RAW ]]; then
+	echo "project;hash;date;added;deleted;changed;absChange;filename;user"
+	if [[ -n $HEADER ]]; then
+		exit 0;
+	fi
+fi
+
+git log --pretty=tformat:'%aI %H %an' $FLAG | while read date hash name; do
 	git log -n 1 --pretty=tformat: --numstat $hash | while read added deleted filename; do
-		echo "${hash};${date};${added};${deleted};${filename};${name}"
+		(( changed = added - deleted ))
+		echo "${PWD##*/};${hash};${date};${added};${deleted};${changed};${changed#-};${filename};${name}"
 	done
 done
 

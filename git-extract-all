@@ -1,0 +1,12 @@
+#!/bin/bash
+
+git extract --header
+
+while read folder; do
+	cd $folder
+	if [[ -d .git ]]; then
+		git extract --raw --year 2>/dev/null
+	fi
+	cd - > /dev/null
+done
+
