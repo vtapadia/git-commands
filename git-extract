@@ -27,8 +27,10 @@ fi
 
 git log --pretty=tformat:'%aI %H %an' $FLAG | while read date hash name; do
 	git log -n 1 --pretty=tformat: --numstat $hash | while read added deleted filename; do
-		(( changed = added - deleted ))
-		echo "${PWD##*/};${hash};${date};${added};${deleted};${changed};${changed#-};${filename};${name}"
+		if [[ $added != '-' && $deleted != '-' ]]; then
+			(( changed = added - deleted ))
+			echo "${PWD##*/};${hash};${date};${added};${deleted};${changed};${changed#-};${filename};${name}"
+		fi
 	done
 done
 
