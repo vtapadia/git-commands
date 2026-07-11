@@ -1,0 +1,347 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+#
+# Defaults
+#
+
+LOCAL=false
+STALE_DAYS=0
+AUTHOR=""
+TOP=0
+SORT="age"
+BASE_BRANCH=""
+SHOW_MERGED=""
+SHOW_UNMERGED=""
+
+INCLUDE_PATTERNS=("*")
+IGNORE_PATTERNS=(
+    "release/*"
+    "main"
+    "master"
+)
+
+usage() {
+cat <<EOF
+
+git repo-health
+
+Usage:
+  git repo-health [options]
+
+Options
+
+  --stale DAYS          Branches older than DAYS
+  --author NAME         Filter by author
+  --branch PATTERN      Include pattern (repeatable)
+  --ignore PATTERN      Ignore pattern (repeatable)
+  --local               Use local branches
+  --merged              Only merged branches
+  --unmerged            Only unmerged branches
+  --base BRANCH         Base branch (default: main/master)
+  --top N              Return only top N results
+  --sort FIELD         age|author|date|ahead|behind|branch
+  --help
+
+Examples
+
+  git repo-health --stale 180
+
+  git repo-health --author Varesh
+
+  git repo-health --branch "feature/*"
+
+  git repo-health --unmerged --stale 90
+
+  git repo-health --sort behind
+
+EOF
+}
+
+#
+# Argument Parsing
+#
+
+while [[ $# -gt 0 ]]
+do
+    case "$1" in
+        --stale)
+            STALE_DAYS="$2"
+            shift 2
+            ;;
+
+        --author)
+            AUTHOR="$2"
+            shift 2
+            ;;
+
+        --branch)
+            if [[ "${INCLUDE_PATTERNS[0]}" == "*" ]]
+            then
+                INCLUDE_PATTERNS=()
+            fi
+
+            INCLUDE_PATTERNS+=("$2")
+            shift 2
+            ;;
+
+        --ignore)
+            IGNORE_PATTERNS+=("$2")
+            shift 2
+            ;;
+
+        --local)
+            LOCAL=true
+            shift
+            ;;
+
+        --merged)
+            SHOW_MERGED=true
+            shift
+            ;;
+
+        --unmerged)
+            SHOW_UNMERGED=true
+            shift
+            ;;
+
+        --top)
+            TOP="$2"
+            shift 2
+            ;;
+
+        --base)
+            BASE_BRANCH="$2"
+            shift 2
+            ;;
+
+        -s|--sort)
+            SORT="$2"
+            shift 2
+            ;;
+
+        -h|--help)
+            usage
+            exit 0
+            ;;
+
+        *)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+    esac
+done
+
+#
+# Determine Base Branch
+#
+
+if [[ -z "$BASE_BRANCH" ]]
+then
+    if git show-ref --verify --quiet refs/heads/main
+    then
+        BASE_BRANCH="main"
+    elif git show-ref --verify --quiet refs/heads/master
+    then
+        BASE_BRANCH="master"
+    else
+        echo "Unable to determine base branch."
+        exit 1
+    fi
+fi
+
+#
+# Reference Scope
+#
+
+if $LOCAL
+then
+    REF="refs/heads"
+else
+    REF="refs/remotes"
+fi
+
+NOW=$(date +%s)
+
+TMPFILE=$(mktemp)
+
+git for-each-ref \
+    --format='%(refname:short)|%(authorname)|%(authoremail)|%(committerdate:unix)|%(committerdate:short)' \
+    "$REF" |
+while IFS='|' read -r branch author email epoch shortdate
+do
+
+    #
+    # Ignore HEAD references
+    #
+
+    [[ "$branch" == *"HEAD" ]] && continue
+
+    #
+    # Include filters
+    #
+
+    include_match=false
+
+    for pattern in "${INCLUDE_PATTERNS[@]}"
+    do
+        [[ "$branch" == $pattern ]] && include_match=true
+    done
+
+    $include_match || continue
+
+    #
+    # Ignore filters
+    #
+
+    ignore_match=false
+
+    for pattern in "${IGNORE_PATTERNS[@]}"
+    do
+        [[ "$branch" == $pattern ]] && ignore_match=true
+    done
+
+    $ignore_match && continue
+
+    #
+    # Author filter
+    #
+
+    if [[ -n "$AUTHOR" ]]
+    then
+        search=$(echo "$AUTHOR" | tr '[:upper:]' '[:lower:]')
+
+        author_lc=$(echo "$author" | tr '[:upper:]' '[:lower:]')
+        email_lc=$(echo "$email"  | tr '[:upper:]' '[:lower:]')
+
+        [[ "$author_lc" != *"$search"* && \
+        "$email_lc"  != *"$search"* ]] && continue
+    fi
+
+    #
+    # Age
+    #
+
+    age=$(( (NOW - epoch) / 86400 ))
+
+    if [[ "$STALE_DAYS" -gt 0 ]]
+    then
+        [[ "$age" -lt "$STALE_DAYS" ]] && continue
+    fi
+
+    #
+    # Normalize remote name
+    #
+
+    compare_branch="$branch"
+
+    if ! $LOCAL
+    then
+        compare_branch="${branch#origin/}"
+    fi
+
+    #
+    # Ahead / Behind
+    #
+
+    if git rev-parse --verify "$compare_branch" >/dev/null 2>&1
+    then
+        counts=$(git rev-list --left-right --count \
+            "${BASE_BRANCH}...${compare_branch}" \
+            2>/dev/null || echo "0 0")
+
+        behind=$(echo "$counts" | awk '{print $1}')
+        ahead=$(echo "$counts" | awk '{print $2}')
+    else
+        ahead=0
+        behind=0
+    fi
+
+    #
+    # Merged
+    #
+
+    merged="N"
+
+    if git merge-base --is-ancestor \
+        "$compare_branch" \
+        "$BASE_BRANCH" 2>/dev/null
+    then
+        merged="Y"
+    fi
+
+    #
+    # merged/unmerged filters
+    #
+
+    if [[ "$SHOW_MERGED" == "true" && "$merged" != "Y" ]]
+    then
+        continue
+    fi
+
+    if [[ "$SHOW_UNMERGED" == "true" && "$merged" != "N" ]]
+    then
+        continue
+    fi
+
+    echo "${branch}|${author}|${shortdate}|${age}|${ahead}|${behind}|${merged}"
+
+done > "$TMPFILE"
+
+#
+# Sort
+#
+
+case "$SORT" in
+    age)
+        SORT_CMD="sort -t'|' -k4,4nr"
+        ;;
+    author)
+        SORT_CMD="sort -t'|' -k2,2"
+        ;;
+    date)
+        SORT_CMD="sort -t'|' -k3,3r"
+        ;;
+    ahead)
+        SORT_CMD="sort -t'|' -k5,5nr"
+        ;;
+    behind)
+        SORT_CMD="sort -t'|' -k6,6nr"
+        ;;
+    branch)
+        SORT_CMD="sort -t'|' -k1,1"
+        ;;
+    *)
+        SORT_CMD="sort -t'|' -k4,4nr"
+        ;;
+esac
+
+RESULTS=$(eval "$SORT_CMD $TMPFILE")
+
+if [[ "$TOP" -gt 0 ]]
+then
+    RESULTS=$(echo "$RESULTS" | head -n "$TOP")
+fi
+
+printf "\n"
+printf "%-45s %-18s %-10s %-6s %-6s %-7s %-6s\n" \
+       "BRANCH" "AUTHOR" "DATE" "AGE" "AHD" "BHD" "MRGD"
+
+printf '%0.s-' {1..110}
+printf "\n"
+
+echo "$RESULTS" |
+while IFS='|' read -r branch author date age ahead behind merged
+do
+    printf "%-45s %-18s %-10s %-6s %-6s %-7s %-6s\n" \
+        "$branch" \
+        "$author" \
+        "$date" \
+        "${age}d" \
+        "$ahead" \
+        "$behind" \
+        "$merged"
+done
+
+rm -f "$TMPFILE"
