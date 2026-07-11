@@ -1,6 +1,30 @@
 #!/bin/bash
+set -e
+step=1
+echo "Step $step: switch to master branch"
+if ! git checkout master; then
+  echo "Error: Failed to switch to master branch, checking main" >&2
+    if ! git checkout main; then
+        echo "Error: Failed to switch to main branch" >&2
+        exit 1
+    fi
+fi
 
-echo "Step 1: Removing local deleted remote branches"
+if ! git pull; then
+  echo "Error: Failed to fetch remote branches" >&2
+  exit 1
+fi
+
+# increment step by 1
+if ! git branch -vv | grep ': gone]' | grep -v "\*" | awk '{ print $1; }' | xargs -rp git branch -D; then
+  echo "Error: Failed to remove local deleted remote branches" >&2
+  exit 1
+fi
+
+echo "Step $step: Fetching remote branches"
+git pull
+
+echo "Step $step: Removing local deleted remote branches"
 
 git fetch -p
 git branch -vv | grep ': gone]'|  grep -v "\*" | awk '{ print $1; }' | xargs -rp git branch -D
