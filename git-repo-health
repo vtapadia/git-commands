@@ -32,17 +32,17 @@ Usage:
 
 Options
 
-  --stale DAYS          Branches older than DAYS
-  --author NAME         Filter by author
-  --branch PATTERN      Include pattern (repeatable)
-  --ignore PATTERN      Ignore pattern (repeatable)
-  --local               Use local branches
-  --merged              Only merged branches
-  --unmerged            Only unmerged branches
-  --base BRANCH         Base branch (default: main/master)
-  --top N              Return only top N results
-  --sort FIELD         age|author|date|ahead|behind|branch
-  --help
+  --stale DAYS             Branches older than DAYS
+  -a|--author NAME         Filter by author
+  -b|--branch PATTERN      Include pattern (repeatable)
+  -i|--ignore PATTERN      Ignore pattern (repeatable)
+  -l|--local               Use local branches
+  --merged                 Only merged branches
+  --unmerged               Only unmerged branches
+  --base BRANCH            Base branch (default: main/master)
+  --top N                  Return only top N results
+  --sort FIELD             age|author|date|ahead|behind|branch
+  -h|--help
 
 Examples
 
@@ -71,12 +71,12 @@ do
             shift 2
             ;;
 
-        --author)
+        -a|--author)
             AUTHOR="$2"
             shift 2
             ;;
 
-        --branch)
+        -b|--branch)
             if [[ "${INCLUDE_PATTERNS[0]}" == "*" ]]
             then
                 INCLUDE_PATTERNS=()
